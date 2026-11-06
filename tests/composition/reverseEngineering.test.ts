@@ -7,7 +7,10 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import { digestFile } from "../../src/application/reverse/ReverseEngineeringService.js";
+import {
+  digestFile,
+  REVERSE_COMMAND_OUTPUT_LIMITATION,
+} from "../../src/application/reverse/ReverseEngineeringService.js";
 import { TestReverseEngineeringService as ReverseEngineeringService } from "../support/reverseEngineeringService.js";
 import { providerSnapshot } from "../support/reverseEngineeringCompositionFixtures.js";
 import { createReverseEngineeringService } from "../../src/composition/reverseEngineering.js";
@@ -15,17 +18,22 @@ import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.j
 import { AnalysisCancelledError } from "../../src/domain/analysisErrorCore.js";
 import { REVERSE_ENGINEERING_TOOL_CONTRACTS } from "../../src/contracts/reverseEngineeringToolContracts.js";
 
-describe("reverse engineering command services", () => {
-  it("documents the shared combined capture limit for both command tools", () => {
-    for (const contract of REVERSE_ENGINEERING_TOOL_CONTRACTS)
-      expect(contract.description).toContain("shared 16 MiB combined limit");
-    expect(REVERSE_ENGINEERING_TOOL_CONTRACTS[0]?.description).toContain(
-      "does not follow local debug links by default",
-    );
-    for (const contract of REVERSE_ENGINEERING_TOOL_CONTRACTS)
-      expect(contract.description).toContain("command_timeout_ms");
-  });
+it("documents the shared combined capture limit for both command tools", () => {
+  expect(REVERSE_ENGINEERING_TOOL_CONTRACTS.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(["inspect_with_objdump", "execute_rizin_command"]),
+  );
+  for (const contract of REVERSE_ENGINEERING_TOOL_CONTRACTS)
+    expect(contract.description).toContain("shared 16 MiB combined limit");
+  expect(
+    REVERSE_ENGINEERING_TOOL_CONTRACTS.find(
+      ({ name }) => name === "inspect_with_objdump",
+    )?.description,
+  ).toContain("does not follow local debug links by default");
+  for (const contract of REVERSE_ENGINEERING_TOOL_CONTRACTS)
+    expect(contract.description).toContain("command_timeout_ms");
+});
 
+describe("reverse engineering command services", () => {
   it("uses compatible local DWARF link flags and disables debuginfod through the environment", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rea-reverse-tools-"));
     const path = join(directory, "fixture.bin");
@@ -68,7 +76,7 @@ describe("reverse engineering command services", () => {
         exit_code: 0,
         output_truncated: false,
       });
-      expect(result.value.provider.id).toBe("gnu.objdump");
+      expect(result.value.provider.id).toBe("objdump.command");
       expect(result.value.subject?.local_path).toBe(path);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -161,13 +169,17 @@ describe("reverse engineering command services", () => {
         command: "wx 00 @ 0",
       });
       expect(result.ok).toBe(true);
-      if (result.ok)
+      if (result.ok) {
         expect(result.value.raw_result).toMatchObject({
           stdout: "captured partial output",
           exit_code: null,
           output_truncated: true,
           completion_status: "unknown",
         });
+        expect(result.value.limitations).toContain(
+          REVERSE_COMMAND_OUTPUT_LIMITATION,
+        );
+      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
